@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { filledCells, levelColor, untilReset } from './register'
+import { filledCells, keepKnown, levelColor, untilReset } from './register'
 
 const context = { tokens: 84_000, window: 200_000, percent: 42 }
 const rateLimits = [
@@ -16,6 +16,16 @@ describe('usage-meter', () => {
     expect(filledCells(42)).toBe(2)
     expect(filledCells(150)).toBe(5)
     expect(untilReset(new Date(134 * 60000).toISOString(), 0)).toBe('2h14m')
+  })
+
+  test('keeps last known limits and cost when a reading has none', async () => {
+    const prev = { window: 200_000, categories: [], usd: 1.5, limits: [{ kind: 'seven_day', percent: 61 }, { kind: 'five_hour', percent: 23 }] }
+    const blank = { window: 200_000, categories: [], limits: [] }
+    expect(keepKnown(prev, blank).limits.map(l => l.kind)).toEqual(['five_hour', 'seven_day'])
+    expect(keepKnown(prev, blank).usd).toBe(1.5)
+    const moved = keepKnown(prev, { ...blank, usd: 2, limits: [{ kind: 'five_hour', percent: 30 }] })
+    expect(moved.limits).toEqual([{ kind: 'five_hour', percent: 30 }, { kind: 'seven_day', percent: 61 }])
+    expect(moved.usd).toBe(2)
   })
 
   for (const surface of ['terminal', 'desktop'] as const) {

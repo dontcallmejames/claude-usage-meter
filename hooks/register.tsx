@@ -8,6 +8,7 @@ const turn = atom({ plugin: 'usage-meter', key: 'turn' } as const, null)
 
 const CELLS = 5
 const LIMIT_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '7d', spend_limit: '$cap' }
+const LIMIT_ORDER = ['five_hour', 'seven_day', 'spend_limit']
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 // Theme keys, so the colors follow the person's theme.
@@ -53,21 +54,30 @@ async function measure($: EngineInterface): Promise<Snapshot> {
   return toSnapshot(u.context, u.rateLimits, u.cost, categories)
 }
 
+// A reading can come back without rate limits or cost (a fresh or restarted session,
+// a response that carried no headers). Keep the last known values instead of blanking them.
+export const keepKnown = (prev: Snapshot | null, fresh: Snapshot): Snapshot => {
+  if (!prev) return fresh
+  const limits = [...prev.limits.filter(p => !fresh.limits.some(f => f.kind === p.kind)), ...fresh.limits]
+  limits.sort((a, b) => LIMIT_ORDER.indexOf(a.kind) - LIMIT_ORDER.indexOf(b.kind))
+  return { ...fresh, limits, usd: fresh.usd ?? prev.usd }
+}
+
 export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     const ran = await next(e)
     const fresh = await measure($)
-    await update($, snap, () => fresh)
+    await update($, snap, s => keepKnown(s, fresh))
     return ran
   })
 
   on('session.measure', async ($, e, next) => {
     if (e.changed.includes('context')) {
       const fresh = await measure($)
-      await update($, snap, () => fresh)
+      await update($, snap, s => keepKnown(s, fresh))
     } else {
-      await update($, snap, s => toSnapshot(e.context, e.rateLimits, e.cost, s?.categories ?? []))
+      await update($, snap, s => keepKnown(s, toSnapshot(e.context, e.rateLimits, e.cost, s?.categories ?? [])))
     }
     return next(e)
   })
@@ -95,7 +105,8 @@ export const register: Register = on => {
     const last = await read($, turn)
     const now = await $.clock.now()
 
-    const Bar = ({ percent }: { percent: number }) => {
+    const Bar = ({ percent }: { percent?: number }) => {
+      if (percent === undefined) return <Text color="subtle">{'▱'.repeat(CELLS)}</Text>
       const n = filledCells(percent)
       return (
         <Box>
@@ -124,7 +135,11 @@ export const register: Register = on => {
     const Sep = () => <Text color="subtle">{' · '}</Text>
 
     const ctx = s.ctxPercent ?? 0
-    const rows = [{ label: 'ctx', percent: ctx }, ...s.limits.map(l => ({ label: LIMIT_LABEL[l.kind] ?? l.kind, percent: l.percent }))]
+    // Until the first reply reports rate limits, show empty 5h/7d slots so they read as
+    // "waiting" rather than missing. After a turn with none, the account has none (API key).
+    const limits: (Omit<Limit, 'percent'> & { percent?: number })[] =
+      s.limits.length > 0 || last ? s.limits : [{ kind: 'five_hour' }, { kind: 'seven_day' }]
+    const rows = [{ label: 'ctx', percent: ctx as number | undefined }, ...limits.map(l => ({ label: LIMIT_LABEL[l.kind] ?? l.kind, percent: l.percent }))]
     const cost = s.usd === undefined ? '' : `$${s.usd.toFixed(2)}`
     const cached = last ? last.input + last.cacheRead + last.cacheWrite : 0
     const hitRate = last && cached > 0 ? Math.round((last.cacheRead / cached) * 100) : 0
@@ -143,11 +158,11 @@ export const register: Register = on => {
                 <Text color={c.color} wrap="truncate">{`${c.name.toLowerCase()} ${compact(c.tokens)}`}</Text>,
               ])}
           </Row>
-          {s.limits.map(l => (
+          {limits.map(l => (
             <Row
               label={LIMIT_LABEL[l.kind] ?? l.kind}
               percent={l.percent}
-              figure={l.resetsAt ? `resets ${untilReset(l.resetsAt, now)}` : ''}
+              figure={l.percent === undefined ? 'waiting for a reply' : l.resetsAt ? `resets ${untilReset(l.resetsAt, now)}` : ''}
             />
           ))}
           <Row label="turn" figure={last ? `${compact(last.input + last.cacheWrite)} in` : 'no turns yet'}>
