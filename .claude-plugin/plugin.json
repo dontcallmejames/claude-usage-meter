@@ -1,0 +1,9 @@
+{
+  "name": "usage-meter",
+  "version": "0.1.0",
+  "description": "Themed usage meters above the prompt: context, rate limits, cost, last turn",
+  "author": { "name": "Jim", "url": "https://github.com/dontcallmejames" },
+  "repository": "https://github.com/dontcallmejames/claude-usage-meter",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
+}

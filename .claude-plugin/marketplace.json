@@ -1,0 +1,6 @@
+{
+  "name": "claude-usage-meter",
+  "description": "Claude Code mods by dontcallmejames",
+  "owner": { "name": "Jim", "url": "https://github.com/dontcallmejames" },
+  "plugins": [{ "name": "usage-meter", "source": "./", "description": "Themed usage meters above the prompt: context, rate limits, cost, last turn" }]
+}
